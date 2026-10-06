@@ -36,7 +36,9 @@ const pTown = (p) => (S.ptown && S.ptown[p.id]) || p.town;
 // ---------- ダイアログ ----------
 function dialog(title, html, choices) {
   const m = $('modal');
-  m.innerHTML = `<div class="box"><h2>${title}</h2><div class="dtext">${html}</div><div class="choices"></div></div>`;
+  const who = speakerFace(html, title);
+  const body = who ? `<div class="talk">${faceSVG(who, 88)}<div class="dtext">${html}</div></div>` : `<div class="dtext">${html}</div>`;
+  m.innerHTML = `<div class="box"><h2>${title}</h2>${body}<div class="choices"></div></div>`;
   const c = m.querySelector('.choices');
   (choices && choices.length ? choices : [{ label: '了解', fn: null }]).forEach((ch) => {
     const b = document.createElement('button');
@@ -192,7 +194,7 @@ function render() {
   const r = rank();
   const t = town();
   const cl = CLANS[t.owner];
-  $('status').innerHTML = `
+  $('status').innerHTML = `${faceSVG('hero', 44)}
     <div class="st-name">${esc(S.name)} <small>${kanji(age())}歳</small></div>
     <div class="st-item"><span>身分</span>${r.name}</div>
     <div class="st-item"><span>日付</span>${dateStr()}</div>
@@ -206,6 +208,8 @@ function render() {
       <div><span class="prov">${t.prov}</span> <b class="tname">${t.name}</b></div>
       <div class="owner" style="background:${cl.color}">${cl.name}</div></div>`;
   const ma = missionActionHere();
+  html += `<div class="townwrap"><canvas id="townCv" width="${TW * TS}" height="${TH * TS}" aria-label="${t.name}の城下町"></canvas>
+    <div class="townhint">建物をタップすると歩いて入ります（パソコンは矢印キーでも歩けます）</div></div>`;
   html += '<div class="facs">';
   if (ma) html += `<button class="fac mission" data-act="mission">⚑ ${ma}</button>`;
   facs.forEach((f) => {
@@ -214,6 +218,13 @@ function render() {
   html += `<button class="fac travel" data-act="travel">🗾 旅立つ</button></div>`;
   html += `<div id="panel">${view ? panelHtml(view) : sceneText()}</div>`;
   $('scene').innerHTML = html;
+  townEnter(S.town);
+  TOWNVIEW.onBump = townBump;
+  const cv = $('townCv');
+  cv.onclick = (e) => {
+    const r = cv.getBoundingClientRect();
+    townClick(Math.floor((e.clientX - r.left) / r.width * TW), Math.floor((e.clientY - r.top) / r.height * TH));
+  };
 
   $('scene').querySelectorAll('[data-fac]').forEach((b) => {
     b.onclick = () => { view = view === b.dataset.fac ? null : b.dataset.fac; render(); };
@@ -226,6 +237,70 @@ function render() {
   });
   renderSide();
 }
+
+// 任務を行う建物
+function missionBuilding() {
+  const m = S.mission;
+  if (!m || m.done || m.town !== S.town) return null;
+  return { build: 'castle', supply: 'castle', scout: 'tea', plot: 'tea', trade: 'market', bandit: 'gate' }[m.type];
+}
+
+function openFacility(id) {
+  view = id;
+  render();
+  const p = $('panel');
+  if (p && p.scrollIntoView) p.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+function townBump(id) {
+  if (!S || S.ended || $('modal').classList.contains('show')) return;
+  const has = facilities().some((f) => f.id === id);
+  const mb = missionBuilding();
+  if (mb === id) {
+    const ma = missionActionHere();
+    const ch = [{ label: `⚑ ${ma}`, fn: doMissionHere, cls: 'hl' }];
+    if (id === 'gate') ch.push({ label: '旅立つ', fn: openMap });
+    else if (has) ch.push({ label: '中に入る', fn: () => openFacility(id) });
+    ch.push({ label: 'やめる', fn: null });
+    return dialog('任務', `ここで任務「${S.mission.title}」を行える。`, ch);
+  }
+  if (id === 'gate') return openMap();
+  if (has) return openFacility(id);
+  if (id === 'castle') return msg('城', town().owner === 'oda' ? '門番「御用の無い者は通せぬ。」<br><span class="hint">（評定は本拠の城で行われる）</span>' : `門番「${CLANS[town().owner].name}の城に何用か！」<br>城門は固く閉ざされている。`);
+  if (id === 'home') return msg('民家', '見知らぬ人の家だ。<br><span class="hint">（自分の屋敷は本拠の町にある）</span>');
+}
+
+function townLoop(now) {
+  const cv = $('townCv');
+  if (cv && S) {
+    if (!$('modal').classList.contains('show')) townUpdate(now);
+    const facs = facilities().map((f) => f.id);
+    const t = town();
+    townDraw(cv.getContext('2d'), now, {
+      month: S.month,
+      flag: CLANS[t.owner].color,
+      labels: { castle: `${t.name}城`, home: facs.includes('home') ? '屋敷' : '民家' },
+      locked: { castle: !facs.includes('castle'), home: !facs.includes('home') },
+      mission: missionBuilding(),
+    });
+  }
+  requestAnimationFrame(townLoop);
+}
+requestAnimationFrame(townLoop);
+
+const KEYDIR = { ArrowUp: [0, -1], ArrowDown: [0, 1], ArrowLeft: [-1, 0], ArrowRight: [1, 0], w: [0, -1], s: [0, 1], a: [-1, 0], d: [1, 0] };
+document.addEventListener('keydown', (e) => {
+  const d = KEYDIR[e.key];
+  if (!d || !$('townCv') || $('modal').classList.contains('show')) return;
+  if (document.activeElement && /INPUT|TEXTAREA/.test(document.activeElement.tagName)) return;
+  e.preventDefault();
+  TOWNVIEW.path = [];
+  TOWNVIEW.held = d;
+});
+document.addEventListener('keyup', (e) => {
+  const d = KEYDIR[e.key];
+  if (d && TOWNVIEW.held === d) TOWNVIEW.held = null;
+});
 
 function sceneText() {
   const t = town();
@@ -260,7 +335,7 @@ function panelHtml(id) {
   let h = '';
   if (id === 'castle') {
     if (S.town === S.capital) {
-      h += '<h3>🏯 城</h3><p class="flavor">広間には家臣たちが居並んでいる。</p>';
+      h += `<h3>🏯 城</h3><div class="talk">${faceSVG('nobunaga', 64)}<p class="flavor">広間の上段に、主君・織田信長が座している。家臣たちが居並ぶ。</p></div>`;
       const can = S.lastHyojo !== ym();
       h += btn(`評定に出る${can ? '' : '（今月は済）'}`, 'hyojo', '', !can);
       if (S.mission && S.mission.done) h += btn('任務の報告', 'report', '', false, 'hl');
@@ -274,7 +349,7 @@ function panelHtml(id) {
     }
   } else if (id === 'home') {
     h += '<h3>🏠 屋敷</h3>';
-    if (S.wife) h += `<p class="flavor">${person(S.wife).name}「おかえりなさいませ。」</p>`;
+    if (S.wife) h += `<div class="talk">${faceSVG(S.wife, 64)}<p class="flavor">${person(S.wife).name}「おかえりなさいませ。」</p></div>`;
     h += btn('休む（3日・体力全快）', 'rest');
     if (S.wife) h += btn('妻と語らう（1日）', 'wifeTalk');
     h += btn('記録する（セーブ）', 'save');
@@ -300,14 +375,14 @@ function panelHtml(id) {
     if (!ps.length) h += '<p class="small">知った顔はいないようだ。</p>';
     ps.forEach((p) => {
       const r = S.rel[p.id];
-      h += `<div class="person"><div><b>${p.name}</b> <small>${p.desc}</small></div>
+      h += `<div class="person">${faceSVG(p.id, 56)}<div class="pbody"><div><b>${p.name}</b> <small>${p.desc}</small></div>
         <div class="relbar"><span>親密度</span><span class="bar"><i style="width:${r}%"></i></span>${r}</div><div>`;
       h += btn('話す（1日）', 'talk', p.id);
       h += btn('贈り物', 'giftMenu', p.id, !giftItems().length);
       if (p.recruit !== undefined && p.recruit !== null) h += btn('与力に誘う', 'recruit', p.id);
       if (p.wife && !S.wife) h += btn('求婚する', 'propose', p.id);
       if (p.teacher) h += btn(`${SKILLS[p.teacher]}の教えを乞う（3日）`, 'learn', p.id);
-      h += '</div></div>';
+      h += '</div></div></div>';
     });
   } else if (id === 'dojo') {
     h += '<h3>🥋 道場</h3><p class="small">1回：5日・10両・体力-20</p>';
@@ -714,21 +789,45 @@ function openMap() {
   });
   svg += '</svg>';
   const legend = [...new Set(ids.map((k) => S.towns[k].owner))].map((o) => `<span><i style="background:${CLANS[o].color}"></i>${CLANS[o].name}</span>`).join('');
-  m.innerHTML = `<div class="box wide"><h2>どこへ向かう？</h2>${svg}<div class="legend">${legend}</div><div class="choices"><button id="mapClose">やめる</button></div></div>`;
+  svg = svg.replace('</svg>', `<path id="route" d="" fill="none" stroke="#ffd34d" stroke-width="3" stroke-dasharray="6 5"/>
+    <g id="walker" transform="translate(${town().x},${town().y})"><circle r="11" fill="#fff6df" stroke="#2b2420" stroke-width="2"/><text y="5" class="wk">歩</text></g></svg>`);
+  m.innerHTML = `<div class="box wide"><h2 id="mapTitle">どこへ向かう？</h2>${svg}<div class="legend">${legend}</div>
+    <div class="choices"><button id="mapGo" class="hl" hidden>出発する</button><button id="mapClose">やめる</button></div></div>`;
   m.classList.add('show');
   $('mapClose').onclick = () => { closeModal(); render(); };
+  let dest = null;
   m.querySelectorAll('.tw').forEach((g) => {
     g.onclick = () => {
       const k = g.dataset.t;
-      if (k === S.town) return;
+      if (k === S.town || m.dataset.moving) return;
+      dest = k;
+      const a = town(), b = town(k);
+      $('route').setAttribute('d', `M${a.x},${a.y} L${b.x},${b.y}`);
+      m.querySelectorAll('.tw').forEach((x) => x.classList.toggle('sel', x === g));
       const d = travelDays(S.town, k);
-      closeModal();
-      dialog('旅立ち', `${town(k).name}へ向かう。（${d}日）`, [
-        { label: '出発する', fn: () => travel(k, d) },
-        { label: 'やめる', fn: null },
-      ]);
+      $('mapTitle').textContent = `${b.name}へ（${d}日）`;
+      $('mapGo').hidden = false;
+      $('mapGo').textContent = `${b.name}へ出発する（${d}日）`;
     };
   });
+  $('mapGo').onclick = () => {
+    if (!dest || m.dataset.moving) return;
+    m.dataset.moving = '1';
+    $('mapGo').disabled = true; $('mapClose').disabled = true;
+    const a = town(), b = town(dest), d = travelDays(S.town, dest);
+    const dur = Math.min(2600, 700 + d * 160);
+    const t0 = performance.now();
+    const step = (now) => {
+      const p = Math.min(1, (now - t0) / dur);
+      const e = p < 0.5 ? 2 * p * p : 1 - Math.pow(-2 * p + 2, 2) / 2;
+      const x = a.x + (b.x - a.x) * e, y = a.y + (b.y - a.y) * e - Math.abs(Math.sin(now / 90)) * 3;
+      $('walker').setAttribute('transform', `translate(${x},${y})`);
+      $('mapTitle').textContent = `旅の途中…… ${Math.max(1, Math.ceil(d * p))}日目`;
+      if (p < 1) requestAnimationFrame(step);
+      else setTimeout(() => { delete m.dataset.moving; closeModal(); travel(dest, d); }, 250);
+    };
+    requestAnimationFrame(step);
+  };
 }
 
 function travel(k, d) {
@@ -738,7 +837,7 @@ function travel(k, d) {
   log(`${town(k).name}に着いた。`);
   if (chance(enemyTrip ? 0.15 : 0.08) && !queue.length) {
     queue.unshift((done) => dialog('野盗だ！', '山道で野盗に囲まれた！<br>「金目のものを置いていけ！」', [
-      { label: '戦う', fn: () => startDuel({ title: '野盗と一騎討ち', kind: 'sword', opp: { name: '野盗の頭', stat: 35 + rnd(25), skill: 1 + rnd(2) } }, (w) => {
+      { label: '戦う', fn: () => startDuel({ title: '野盗と一騎討ち', kind: 'sword', opp: { name: '野盗の頭', stat: 35 + rnd(25), skill: 1 + rnd(2), face: 'bandit' } }, (w) => {
         if (w) { const g = 10 + rnd(30); S.gold += g; gainStat('bu', 1); msg('撃退', `野盗を追い払った！奪われていた銭${g}両を取り戻した。（武力+1）`, done); } else { S.hp -= 25; const l = Math.floor(S.gold * 0.3); S.gold -= l; checkHp(); msg('敗北', `打ちのめされ、${l}両を奪われた……。`, done); }
       }) },
       { label: '金を渡す', fn: () => { const l = Math.floor(S.gold * 0.2); S.gold -= l; msg('野盗', `${l}両を渡して見逃してもらった。`, done); } },
@@ -812,16 +911,18 @@ function startDuel(o, cb) {
   const draw = (who) => ({ type: pick(['a', 'd', 't']), pow: 1 + rnd(3) + (chance(who.skill / 6) ? 2 : 0) });
   for (let i = 0; i < 5; i++) { me.hand.push(draw(me)); op.hand.push(draw(op)); }
   let shown = rnd(5); let round = 1; const lg = [];
+  const pp = PEOPLE.find((p) => p.name === o.opp.name);
+  const oppFace = o.opp.face || (pp && pp.id) || (/野盗/.test(o.opp.name) ? 'bandit' : /豪商/.test(o.opp.name) ? 'merchant' : 'samurai');
   const m = $('modal');
   const cardHtml = (c, cls) => `<span class="card ${c.type} ${cls || ''}"><b>${L[c.type]}</b><i>${c.pow}</i></span>`;
   function dmg(c, s) { return Math.max(1, Math.round(c.pow * 2.4 * (0.7 + s / 150))); }
   function show() {
     m.innerHTML = `<div class="box"><h2>${kind === 'sword' ? '⚔' : '💬'} ${o.title}</h2>
       <div class="duel">
-        <div class="side"><b>${esc(o.opp.name)}</b><span class="bar big red"><i style="width:${op.hp / op.max * 100}%"></i></span>${op.hp}
+        <div class="side">${faceSVG(oppFace, 48)}<b>${esc(o.opp.name)}</b><span class="bar big red"><i style="width:${op.hp / op.max * 100}%"></i></span>${op.hp}
           <div class="hand">${op.hand.map((c, i) => i === shown ? cardHtml(c, 'peek') : '<span class="card back">？</span>').join('')}</div></div>
         <div class="vs">第${round}合</div>
-        <div class="side"><b>${esc(S.name)}</b><span class="bar big"><i style="width:${me.hp / me.max * 100}%"></i></span>${me.hp}
+        <div class="side">${faceSVG('hero', 48)}<b>${esc(S.name)}</b><span class="bar big"><i style="width:${me.hp / me.max * 100}%"></i></span>${me.hp}
           <div class="hand mine">${me.hand.map((c, i) => `<button class="cardbtn" data-c="${i}">${cardHtml(c)}</button>`).join('')}</div></div>
       </div>
       <p class="small rule">「${L.a}」は「${L.t}」に勝ち、「${L.t}」は「${L.d}」に勝ち、「${L.d}」は「${L.a}」に勝つ。同じ型なら数字の大きい方が勝つ。<br>相手の手札が1枚だけ見えている。読み合いで勝て！</p>
@@ -845,7 +946,7 @@ function startDuel(o, cb) {
     if (me.hp <= 0 || op.hp <= 0 || round > 12) {
       const win = op.hp <= 0 ? true : me.hp <= 0 ? false : me.hp / me.max >= op.hp / op.max;
       if (win) gainSkill(kind === 'sword' ? 'ken' : 'ben', 8);
-      m.innerHTML = `<div class="box"><h2>${win ? '勝利！' : '敗北…'}</h2><div class="blog">${lg.slice(-3).join('<br>')}</div>
+      m.innerHTML = `<div class="box"><h2>${win ? '勝利！' : '敗北…'}</h2><div class="talk">${faceSVG(win ? 'hero' : oppFace, 72)}<div class="blog">${lg.slice(-3).join('<br>')}</div></div>
         <p>${win ? `${esc(o.opp.name)}を${kind === 'sword' ? '打ち負かした' : '言い負かした'}！` : `${esc(o.opp.name)}に敗れた……。`}</p>
         <div class="choices"><button id="duelEnd">次へ</button></div></div>`;
       $('duelEnd').onclick = () => { closeModal(); cb(win); };
@@ -883,59 +984,83 @@ function startBattle(o, cb) {
     def.troops -= d;
     def.morale = clamp(def.morale - Math.round(d / def.max * 70), 0, 100);
   }
-  function draw() {
-    const bar = (s, cls) => `<div class="gauge"><span>兵</span><span class="bar big ${cls}"><i style="width:${s.troops / s.max * 100}%"></i></span>${s.troops}</div>
-      <div class="gauge"><span>士気</span><span class="bar big mor"><i style="width:${s.morale}%"></i></span>${s.morale}</div>`;
-    m.innerHTML = `<div class="box"><h2>🎌 ${o.title}</h2><p>第${turn}合 / ${maxTurn}</p>
-      <div class="armies"><div><b>${esc(S.name)}隊</b>${bar(me, '')}</div><div><b>${G.name}隊</b>${bar(en, 'red')}</div></div>
-      <div class="blog">${lg.slice(-5).join('<br>')}</div>
-      <div class="choices">
+  const EN_COLOR = { yoshimoto: '#8e44ad', tatsuoki: '#16a085', rokkaku: '#6d7378', asakura: '#d35400', nagamasa: '#2980b9', katsuyori: '#922b21', mori: '#196f3d', mitsuhide: '#2c3e8f', bandit: '#6a5a40', ikki: '#b7950b' };
+  let bv = null; let busy = false;
+  function build() {
+    if (bv) bv.stop();
+    m.innerHTML = `<div class="box wide battle"><h2>🎌 ${o.title}</h2>
+      <canvas id="bcv" width="900" height="290" aria-label="合戦の様子"></canvas>
+      <div class="armies">
+        <div class="army">${faceSVG('hero', 52)}<div><b>${esc(S.name)}隊</b><div id="bme"></div></div></div>
+        <div class="army">${faceSVG(o.enemy, 52)}<div><b>${G.name}隊</b><div id="ben"></div></div></div>
+      </div>
+      <p class="turn" id="bturn"></p>
+      <div class="blog" id="blog"></div>
+      <div class="choices" id="bcmd">
         <button data-c="charge">突撃</button>
         <button data-c="shoot">射撃</button>
         <button data-c="cheer">鼓舞</button>
         <button data-c="scheme">策略</button>
-        <button data-c="duel" ${dueled ? 'disabled' : ''}>一騎討ち</button>
+        <button data-c="duel">一騎討ち</button>
         <button data-c="retreat">退却</button>
       </div></div>`;
-    m.querySelectorAll('[data-c]').forEach((b) => { b.onclick = () => cmd(b.dataset.c); });
+    bv = BattleView($('bcv'), { myColor: CLANS.oda.color, enColor: EN_COLOR[o.enemy] || '#555', mode: o.mode });
+    bv.set(me.troops / me.max, en.troops / en.max);
+    m.querySelectorAll('[data-c]').forEach((b) => { b.onclick = () => { if (!busy) cmd(b.dataset.c); }; });
+    m.classList.add('show');
+  }
+  function draw() {
+    const bar = (s, cls) => `<div class="gauge"><span>兵</span><span class="bar big ${cls}"><i style="width:${s.troops / s.max * 100}%"></i></span>${s.troops}</div>
+      <div class="gauge"><span>士気</span><span class="bar big mor"><i style="width:${s.morale}%"></i></span>${s.morale}</div>`;
+    $('bme').innerHTML = bar(me, '');
+    $('ben').innerHTML = bar(en, 'red');
+    $('bturn').textContent = `第${Math.min(turn, maxTurn)}合 / ${maxTurn}`;
+    $('blog').innerHTML = lg.slice(-3).join('<br>');
+    m.querySelectorAll('[data-c]').forEach((b) => { b.disabled = busy || (b.dataset.c === 'duel' && dueled); });
   }
   function enemyTurn(mult) {
     if (en.troops <= 0) return;
     if (chance(0.15) && en.chi > 40) {
-      if (chance(en.chi / (en.chi + me.chi))) { me.morale = clamp(me.morale - 15, 0, 100); lg.push(`<b class="dn">${G.name}の計略にかかった！士気-15</b>`); return; }
+      if (chance(en.chi / (en.chi + me.chi))) { me.morale = clamp(me.morale - 15, 0, 100); lg.push(`<b class="dn">${G.name}の計略にかかった！士気-15</b>`); bv.fx('trick', 'en', 700); return; }
     }
     const d = hit(en, me, mult * (o.mode === 'survive' ? 1.3 : 1));
     apply(me, d); lg.push(`敵の攻撃！味方 -${d}`);
+    bv.fx('charge', 'en', 700);
   }
   function cmd(c) {
     if (c === 'retreat') return finish(false, '退却した。');
     if (c === 'duel') {
       dueled = true;
-      return startDuel({ title: `${G.name}と一騎討ち`, kind: 'sword', opp: { name: G.name, stat: G.bu, skill: Math.floor(G.bu / 25) } }, (win) => {
-        if (win) { en.morale = clamp(en.morale - 35, 0, 100); lg.push(`<b class="up">一騎討ちに勝利！敵の士気が大きく下がった！</b>`); }
+      bv.stop();
+      return startDuel({ title: `${G.name}と一騎討ち`, kind: 'sword', opp: { name: G.name, stat: G.bu, skill: Math.floor(G.bu / 25), face: o.enemy } }, (win) => {
+        if (win) { en.morale = clamp(en.morale - 35, 0, 100); lg.push('<b class="up">一騎討ちに勝利！敵の士気が大きく下がった！</b>'); }
         else { me.morale = clamp(me.morale - 25, 0, 100); S.hp -= 25; lg.push('<b class="dn">一騎討ちに敗れた……味方の士気が下がった。</b>'); }
-        m.classList.add('show'); next();
+        build(); next();
       });
     }
     if (c === 'charge') {
-      const d = hit(me, en, 1.3 + S.skills.uma * 0.08); apply(en, d); lg.push(`突撃！敵 -${d}`); enemyTurn(1.1);
+      const d = hit(me, en, 1.3 + S.skills.uma * 0.08); apply(en, d); lg.push(`突撃！敵 -${d}`); bv.fx('charge', 'me'); enemyTurn(1.1);
     } else if (c === 'shoot') {
       let mult = 0.7 + S.skills.yumi * 0.08 + S.skills.teppo * 0.12 + (S.owned.gun ? 0.2 : 0);
       if (o.mode === 'guns') mult *= 2.2;
       if (o.mode === 'rain') mult *= 0.6;
-      const d = hit(me, en, mult); apply(en, d); lg.push(`矢弾を浴びせた！敵 -${d}`); enemyTurn(0.55);
+      const d = hit(me, en, mult); apply(en, d); lg.push(`矢弾を浴びせた！敵 -${d}`);
+      bv.fx(o.mode === 'guns' || S.skills.teppo >= 2 || S.owned.gun ? 'gun' : 'shoot', 'me'); enemyTurn(0.55);
     } else if (c === 'cheer') {
-      const up = 10 + Math.floor(S.stats.mi / 8); me.morale = clamp(me.morale + up, 0, 100); lg.push(`兵を鼓舞した！士気+${up}`); enemyTurn(0.9);
+      const up = 10 + Math.floor(S.stats.mi / 8); me.morale = clamp(me.morale + up, 0, 100); lg.push(`兵を鼓舞した！士気+${up}`); bv.fx('cheer', 'me'); enemyTurn(0.9);
     } else if (c === 'scheme') {
       let p = me.chi / (me.chi + en.chi);
       if (o.mode === 'rain') p += 0.25;
       if (chance(p)) {
         const d = Math.round(en.troops * 0.15); apply(en, d); en.morale = clamp(en.morale - 20, 0, 100);
-        lg.push(`<b class="up">${o.mode === 'rain' ? '雨に紛れた奇襲が' : '策'}が決まった！敵 -${d}・士気-20</b>`);
-        enemyTurn(0.6);
-      } else { me.morale = clamp(me.morale - 8, 0, 100); lg.push('策は見破られた……。士気-8'); enemyTurn(1); }
+        lg.push(`<b class="up">${o.mode === 'rain' ? '雨に紛れた奇襲' : '策'}が決まった！敵 -${d}・士気-20</b>`);
+        bv.fx('scheme', 'me'); enemyTurn(0.6);
+      } else { me.morale = clamp(me.morale - 8, 0, 100); lg.push('策は見破られた……。士気-8'); bv.fx('fail', 'me'); enemyTurn(1); }
     }
-    next();
+    // 演出が終わってから結果を反映
+    busy = true; draw();
+    setTimeout(() => { if (!$('bcv')) return; bv.set(me.troops / me.max, en.troops / en.max); }, 450);
+    setTimeout(() => { if (!$('bcv')) return; busy = false; next(); }, 1300);
   }
   function next() {
     turn++;
@@ -948,15 +1073,17 @@ function startBattle(o, cb) {
     draw();
   }
   function finish(win, text) {
+    if (bv) bv.stop();
     if (win) { gainStat('tou', 1); }
     S.hp = Math.max(1, S.hp - 10);
-    m.innerHTML = `<div class="box"><h2>${win ? '勝利！' : '敗北…'}</h2><div class="blog">${lg.slice(-4).join('<br>')}</div><p>${text}</p>
-      <div class="choices"><button id="batEnd">次へ</button></div></div>`;
+    m.innerHTML = `<div class="box"><h2>${win ? '勝利！' : '敗北…'}</h2><div class="talk">${faceSVG(win ? 'hero' : o.enemy, 72)}<div class="blog">${lg.slice(-4).join('<br>')}</div></div><p class="result ${win ? 'up' : 'dn'}">${text}</p>
+      <div class="choices"><button id="batEnd" class="hl">次へ</button></div></div>`;
     m.classList.add('show');
     $('batEnd').onclick = () => { closeModal(); cb(win); };
   }
-  m.classList.add('show');
-  draw();
+  turn = 0;
+  build();
+  next();
 }
 
 // ---------- 歴史イベント ----------
@@ -1134,12 +1261,14 @@ function title() {
   $('status').innerHTML = '';
   $('side').innerHTML = '';
   $('scene').innerHTML = `<div class="title">
+    <canvas id="titleCv" width="760" height="360" aria-hidden="true"></canvas>
     <h1>戦国出世録</h1><p class="sub">― 足軽から天下人へ ―</p>
     <label>名前 <input id="pname" value="木下藤吉郎" maxlength="10"></label>
     <div class="choices"><button id="start" class="hl">はじめから</button>
     <button id="cont" ${hasSave() ? '' : 'disabled'}>つづきから</button></div>
     <p class="small">一五五四年、尾張。一介の足軽となった男の立身出世の物語。<br>
     任務・修行・人との縁・合戦を重ね、一五八二年の運命の日を迎えよ。</p></div>`;
+  titleScene($('titleCv'));
   $('start').onclick = () => newGame($('pname').value.trim());
   $('cont').onclick = () => load();
 }

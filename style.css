@@ -130,3 +130,25 @@ table th { text-align: left; font-weight: normal; color: var(--sub); width: 4.5e
 .title .choices { justify-content: center; }
 .ending .dtext { margin-bottom: 12px; }
 main:has(#side:empty) { grid-template-columns: 1fr; }
+
+/* ===== グラフィック ===== */
+.face { flex: none; border-radius: 6px; display: block; }
+#status .face { width: 40px; height: 40px; }
+.talk { display: flex; gap: 14px; align-items: flex-start; }
+.talk > :not(.face) { min-width: 0; flex: 1; }
+.townwrap { margin: 12px 0 0; border: 3px solid #3a2618; border-radius: 6px; overflow: hidden; background: #3a2618; box-shadow: 0 4px 0 rgba(0,0,0,.15); }
+#townCv { display: block; width: 100%; height: auto; cursor: pointer; touch-action: manipulation; }
+.townhint { font-size: 12px; color: #e8dcc0; padding: 4px 10px; background: #3a2618; }
+.person { display: flex; gap: 10px; align-items: flex-start; }
+.pbody { min-width: 0; flex: 1; }
+.battle canvas { display: block; width: 100%; height: auto; border-radius: 6px; border: 2px solid #3a2618; }
+.army { display: flex; gap: 8px; align-items: center; margin-top: 8px; }
+.turn { margin: 6px 0 0; font-weight: bold; color: var(--accent); }
+.result { font-size: 18px; font-weight: bold; }
+.duel .side { display: flex; flex-wrap: wrap; gap: 6px 8px; align-items: center; }
+.duel .side .hand { flex-basis: 100%; }
+.title { position: relative; padding-top: 0; }
+#titleCv { display: block; width: 100%; max-width: 760px; height: auto; margin: 0 auto 8px; border-radius: 10px; border: 3px solid #3a2618; }
+.map .tw.sel circle { stroke: #ffd34d; stroke-width: 4; }
+.map .wk { font-size: 12px; text-anchor: middle; fill: #2b2420; font-weight: bold; }
+@media (prefers-reduced-motion: reduce) { .cardbtn:hover .card { transform: none; } }
