@@ -1144,4 +1144,4 @@ function title() {
   $('cont').onclick = () => load();
 }
 
-window.addEventListener('DOMContentLoaded', title);
+if (document.readyState === 'loading') window.addEventListener('DOMContentLoaded', title); else title();
